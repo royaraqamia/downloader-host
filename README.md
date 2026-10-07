@@ -38,6 +38,8 @@ The app never carries media bytes; the visitor downloads straight from here.
 
 ## Deploy on Render (free)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/royaraqamia/downloader-host)
+
 **Blueprint (recommended):**
 
 1. Render → **New → Blueprint** → select this repository (`render.yaml`).
