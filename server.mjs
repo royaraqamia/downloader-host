@@ -26,7 +26,7 @@ import {
 
 const PORT = Number(process.env.PORT ?? 8080);
 const PUBLIC_BASE_URL = (
-  process.env.PUBLIC_BASE_URL ?? `http://localhost:${PORT}`
+  process.env.PUBLIC_BASE_URL?.trim() || `http://localhost:${PORT}`
 ).replace(/\/+$/, "");
 const PROVIDER_TOKEN = process.env.PROVIDER_TOKEN ?? "";
 const CALLBACK_SECRET = process.env.CALLBACK_SECRET ?? "";
@@ -392,7 +392,7 @@ function serveMedia(res, fileId, searchParams) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", PUBLIC_BASE_URL);
+  const url = new URL(req.url ?? "/", "http://internal");
 
   if (
     req.method === "GET" &&
