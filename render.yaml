@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: downloader-host
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    envVars:
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: PROVIDER_TOKEN
+        sync: false
+      - key: CALLBACK_SECRET
+        sync: false
+      - key: MEDIA_SIGNING_SECRET
+        sync: false

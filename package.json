@@ -1,0 +1,14 @@
+{
+  "name": "downloader-host",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted media download host (yt-dlp) for royaraqamia's Media Downloader.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  }
+}
