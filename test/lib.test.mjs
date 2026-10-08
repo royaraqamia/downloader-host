@@ -5,6 +5,8 @@ import {
   YTDLP_NETWORK_ARGS,
   YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
+  deriveMediaType,
+  estimateFormatSizes,
   extensionForFormat,
   parseFfprobeDuration,
   safeEqual,
@@ -140,4 +142,71 @@ test("FAILURE_MESSAGES covers every kind the classifier can return", () => {
     assert.equal(typeof FAILURE_MESSAGES[kind], "string");
     assert.ok(FAILURE_MESSAGES[kind].length > 0);
   }
+});
+
+test("deriveMediaType reads streams then falls back to the container", () => {
+  assert.equal(
+    deriveMediaType({
+      formats: [
+        { vcodec: "avc1", acodec: "none", height: 720 },
+        { vcodec: "none", acodec: "mp4a" },
+      ],
+    }),
+    "video",
+  );
+  assert.equal(
+    deriveMediaType({ formats: [{ vcodec: "none", acodec: "mp4a" }] }),
+    "audio",
+  );
+  assert.equal(deriveMediaType({ ext: "jpg", formats: [] }), "image");
+  assert.equal(deriveMediaType({ formats: [] }), "unknown");
+});
+
+test("estimateFormatSizes sums merged streams and estimates from bitrate", () => {
+  const info = {
+    duration: 100,
+    formats: [
+      { vcodec: "avc1", acodec: "none", height: 720, filesize: 8_000_000 },
+      { vcodec: "avc1", acodec: "none", height: 360, filesize: 3_000_000 },
+      { vcodec: "none", acodec: "mp4a", filesize: 1_000_000 },
+    ],
+  };
+  const sizes = estimateFormatSizes(info, "video");
+  const byFormat = Object.fromEntries(
+    sizes.map((s) => [s.format, s.filesizeBytes]),
+  );
+  // 720p merges the best video + audio; 360p merges the 360p video + audio.
+  assert.equal(byFormat["video-720p"], 9_000_000);
+  assert.equal(byFormat["video-360p"], 4_000_000);
+  // No 480p stream, so the 480p option falls back to the best at or below it (360p).
+  assert.equal(byFormat["video-480p"], 4_000_000);
+  assert.equal(byFormat.audio, 1_000_000);
+  // 1080p has no stream at or below 1080 with video-only besides these; it reuses 720p.
+  assert.equal(byFormat["video-1080p"], 9_000_000);
+});
+
+test("estimateFormatSizes estimates an audio-only link and derives from tbr", () => {
+  const sizes = estimateFormatSizes(
+    {
+      duration: 10,
+      formats: [{ vcodec: "none", acodec: "mp4a", tbr: 128 }],
+    },
+    "audio",
+  );
+  assert.deepEqual(sizes, [
+    { format: "audio", filesizeBytes: 160_000 },
+    { format: "audio-mp3", filesizeBytes: 160_000 },
+  ]);
+});
+
+test("estimateFormatSizes offers image recodes but not for svg sources", () => {
+  const jpg = estimateFormatSizes({ ext: "jpg", filesize: 2_000_000 }, "image");
+  assert.deepEqual(
+    jpg.map((s) => s.format),
+    ["image-original", "image-jpg", "image-png", "image-webp"],
+  );
+  assert.equal(jpg[0].filesizeBytes, 2_000_000);
+
+  const svg = estimateFormatSizes({ ext: "svg", filesize: 5000 }, "image");
+  assert.deepEqual(svg, [{ format: "image-original", filesizeBytes: 5000 }]);
 });

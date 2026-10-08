@@ -17,6 +17,8 @@ import {
   YTDLP_NETWORK_ARGS,
   YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
+  deriveMediaType,
+  estimateFormatSizes,
   extensionForFormat,
   parseFfprobeDuration,
   safeEqual,
@@ -42,6 +44,7 @@ const MAX_CONCURRENT_JOBS = Math.max(
 const JOB_TIMEOUT_MS = Number(process.env.JOB_TIMEOUT_MS ?? 240_000);
 const YTDLP_PATH = process.env.YTDLP_PATH ?? "yt-dlp";
 const FFPROBE_PATH = process.env.FFPROBE_PATH ?? "ffprobe";
+const FFMPEG_PATH = process.env.FFMPEG_PATH ?? "ffmpeg";
 const WORK_DIR = process.env.WORK_DIR ?? "/tmp/downloader";
 const MEDIA_DIR = path.join(WORK_DIR, "media");
 
@@ -96,6 +99,11 @@ function sendJson(res, status, body) {
     "content-length": Buffer.byteLength(payload),
   });
   res.end(payload);
+}
+
+function isAuthorized(req) {
+  const supplied = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+  return safeEqual(supplied, PROVIDER_TOKEN);
 }
 
 function readJson(req, limitBytes = 64 * 1024) {
@@ -221,14 +229,64 @@ async function probe(url) {
     };
   try {
     const info = JSON.parse(result.stdout);
-    return {
-      ok: true,
-      title: typeof info.title === "string" ? info.title : null,
-      duration: typeof info.duration === "number" ? info.duration : null,
-    };
+    return { ok: true, info };
   } catch {
     return { ok: false, kind: "generic", stderr: result.stdout };
   }
+}
+
+/** In-memory probe cache: the host is a single process, so this is effective. */
+const probeCache = new Map();
+const PROBE_CACHE_TTL_MS = 10 * 60 * 1000;
+const PROBE_CACHE_MAX = 200;
+
+function probeCached(entry) {
+  const now = Date.now();
+  for (const [key, value] of probeCache) {
+    if (now - value.at > PROBE_CACHE_TTL_MS) probeCache.delete(key);
+  }
+  return entry && now - entry.at <= PROBE_CACHE_TTL_MS ? entry.value : null;
+}
+
+function cacheProbe(url, value) {
+  if (probeCache.size >= PROBE_CACHE_MAX) {
+    const oldest = [...probeCache.entries()].sort(
+      (a, b) => a[1].at - b[1].at,
+    )[0];
+    if (oldest) probeCache.delete(oldest[0]);
+  }
+  probeCache.set(url, { at: Date.now(), value });
+}
+
+/** Shape a successful yt-dlp `-J` payload into the app's ProbeResult body. */
+function buildProbePayload(url, info) {
+  const mediaType = deriveMediaType(info);
+  return {
+    status: "ok",
+    platform: hostnameOf(url),
+    title: typeof info.title === "string" ? info.title : null,
+    durationSeconds: typeof info.duration === "number" ? info.duration : null,
+    thumbnailUrl: typeof info.thumbnail === "string" ? info.thumbnail : null,
+    mediaType,
+    formats: estimateFormatSizes(info, mediaType),
+  };
+}
+
+/** Inspect a link without downloading; the app shapes the visitor-facing copy. */
+async function handleProbe(url) {
+  const cached = probeCached(probeCache.get(url));
+  if (cached) return cached;
+
+  const meta = await probe(url);
+  let payload;
+  if (!meta.ok) {
+    const known = ["blocked", "unavailable", "unsupported"];
+    payload = { status: known.includes(meta.kind) ? meta.kind : "unknown" };
+  } else {
+    payload = buildProbePayload(url, meta.info);
+  }
+  cacheProbe(url, payload);
+  return payload;
 }
 
 function download(url, format, { jobId, maxSizeBytes }) {
@@ -260,6 +318,13 @@ function findOutput(jobId, ext) {
     (name) => name.startsWith(`${jobId}.`) && !name.endsWith(".part"),
   );
   return match ? path.join(WORK_DIR, match) : null;
+}
+
+/** Recode a downloaded image into the requested container; null means "keep the original". */
+async function convertImage(src, targetExt, jobId) {
+  const out = path.join(WORK_DIR, `${jobId}.conv.${targetExt}`);
+  const result = await runCommand(FFMPEG_PATH, ["-y", "-i", src, out], 30_000);
+  return result.code === 0 && existsSync(out) ? out : null;
 }
 
 async function probeDuration(filePath) {
@@ -327,7 +392,10 @@ async function handleJob(job) {
       await fail(meta.kind, "probe", meta.stderr);
       return;
     }
-    if (meta.duration !== null && meta.duration > maxDurationSeconds) {
+    const info = meta.info;
+    const probedDuration =
+      typeof info.duration === "number" ? info.duration : null;
+    if (probedDuration !== null && probedDuration > maxDurationSeconds) {
       await fail("duration", "duration");
       return;
     }
@@ -356,8 +424,18 @@ async function handleJob(job) {
     // Trust the container yt-dlp actually produced over the requested one, so the
     // filename and Content-Type always match the bytes (a fallback format may be
     // a single file yt-dlp did not remux).
-    const ext =
+    let ext =
       path.extname(workFile).replace(/^\./, "").toLowerCase() || expectedExt;
+    // A jpg/png/webp image request is recoded from the original with ffmpeg.
+    if (format.startsWith("image") && format !== "image-original") {
+      const target = extensionForFormat(format);
+      const converted = await convertImage(workFile, target, jobId);
+      if (converted) {
+        rmSync(workFile, { force: true });
+        workFile = converted;
+        ext = target;
+      }
+    }
     const sizeBytes = statSync(workFile).size;
     if (sizeBytes > maxSizeBytes) {
       await fail("size", "size");
@@ -365,7 +443,7 @@ async function handleJob(job) {
     }
 
     const durationSeconds =
-      (await probeDuration(workFile)) ?? meta.duration ?? 0;
+      (await probeDuration(workFile)) ?? probedDuration ?? 0;
 
     const fileId = randomUUID();
     const ttlSeconds = linkTtlSeconds ?? MEDIA_TTL_SECONDS;
@@ -374,7 +452,7 @@ async function handleJob(job) {
     renameSync(workFile, finalPath);
     workFile = null;
 
-    const filename = `${sanitizeFilename(meta.title, jobId)}.${ext}`;
+    const filename = `${sanitizeFilename(info.title, jobId)}.${ext}`;
     media.set(fileId, { path: finalPath, filename, expiresAt: expiresAtMs });
 
     const signature = signMedia(fileId, expiresAtMs, MEDIA_SIGNING_SECRET);
@@ -424,6 +502,12 @@ function contentTypeFor(filename) {
   if (filename.endsWith(".m4a")) return "audio/mp4";
   if (filename.endsWith(".webm")) return "video/webm";
   if (filename.endsWith(".mp4")) return "video/mp4";
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg"))
+    return "image/jpeg";
+  if (filename.endsWith(".png")) return "image/png";
+  if (filename.endsWith(".webp")) return "image/webp";
+  if (filename.endsWith(".gif")) return "image/gif";
+  if (filename.endsWith(".svg")) return "image/svg+xml";
   return "application/octet-stream";
 }
 
@@ -478,11 +562,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "POST" && url.pathname === "/dispatch") {
-    const supplied = (req.headers.authorization ?? "").replace(
-      /^Bearer\s+/i,
-      "",
-    );
-    if (!safeEqual(supplied, PROVIDER_TOKEN)) {
+    if (!isAuthorized(req)) {
       sendJson(res, 401, { error: "unauthorized" });
       return;
     }
@@ -507,6 +587,32 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, 202, { accepted: true });
     queue.push(job);
     pump();
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/probe") {
+    if (!isAuthorized(req)) {
+      sendJson(res, 401, { error: "unauthorized" });
+      return;
+    }
+    let body;
+    try {
+      body = await readJson(req);
+    } catch {
+      sendJson(res, 400, { error: "invalid body" });
+      return;
+    }
+    const target =
+      typeof body?.url === "string" && HTTP_URL_RE.test(body.url)
+        ? body.url
+        : null;
+    if (!target) {
+      sendJson(res, 400, { error: "invalid url" });
+      return;
+    }
+    // A probe "failure" (blocked/unavailable/unsupported) is a valid, shaped
+    // result the app turns into copy — never a transport error.
+    sendJson(res, 200, await handleProbe(target));
     return;
   }
 
