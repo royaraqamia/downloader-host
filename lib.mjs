@@ -9,29 +9,29 @@ export const SUPPORTED_FORMATS = [
 ];
 
 const FORMAT_ARGS = {
-  audio: ["-x", "--audio-format", "mp3", "--audio-quality", "0"],
+  audio: ["-x", "--audio-format", "m4a", "--audio-quality", "0"],
   "video-360p": [
     "-f",
-    "bv*[height<=360]+ba/b[height<=360]",
+    "bv*[height<=360]+ba/b[height<=360]/b",
     "--merge-output-format",
     "mp4",
   ],
   "video-720p": [
     "-f",
-    "bv*[height<=720]+ba/b[height<=720]",
+    "bv*[height<=720]+ba/b[height<=720]/b",
     "--merge-output-format",
     "mp4",
   ],
   "video-1080p": [
     "-f",
-    "bv*[height<=1080]+ba/b[height<=1080]",
+    "bv*[height<=1080]+ba/b[height<=1080]/b",
     "--merge-output-format",
     "mp4",
   ],
 };
 
 const FORMAT_EXT = {
-  audio: "mp3",
+  audio: "m4a",
   "video-360p": "mp4",
   "video-720p": "mp4",
   "video-1080p": "mp4",

@@ -13,6 +13,7 @@ import {
 
 test("ytdlpArgsForFormat maps each supported format and rejects others", () => {
   assert.ok(ytdlpArgsForFormat("audio").includes("-x"));
+  assert.ok(ytdlpArgsForFormat("audio").includes("m4a"));
   assert.ok(
     ytdlpArgsForFormat("video-720p").some((arg) => arg.includes("height<=720")),
   );
@@ -20,7 +21,7 @@ test("ytdlpArgsForFormat maps each supported format and rejects others", () => {
 });
 
 test("extensionForFormat", () => {
-  assert.equal(extensionForFormat("audio"), "mp3");
+  assert.equal(extensionForFormat("audio"), "m4a");
   assert.equal(extensionForFormat("video-1080p"), "mp4");
   assert.throws(() => extensionForFormat("nope"));
 });

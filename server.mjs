@@ -274,8 +274,8 @@ async function handleJob(job) {
       return;
     }
 
-    const ext = extensionForFormat(format);
-    workFile = findOutput(jobId, ext);
+    const expectedExt = extensionForFormat(format);
+    workFile = findOutput(jobId, expectedExt);
     if (!workFile) {
       await postCallback(callbackUrl, {
         jobId,
@@ -285,6 +285,11 @@ async function handleJob(job) {
       return;
     }
 
+    // Trust the container yt-dlp actually produced over the requested one, so the
+    // filename and Content-Type always match the bytes (a fallback format may be
+    // a single file yt-dlp did not remux).
+    const ext =
+      path.extname(workFile).replace(/^\./, "").toLowerCase() || expectedExt;
     const sizeBytes = statSync(workFile).size;
     if (sizeBytes > maxSizeBytes) {
       await postCallback(callbackUrl, {
