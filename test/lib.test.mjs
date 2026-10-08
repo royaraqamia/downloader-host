@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   FAILURE_MESSAGES,
+  YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
   extensionForFormat,
   parseFfprobeDuration,
@@ -25,6 +26,12 @@ test("extensionForFormat", () => {
   assert.equal(extensionForFormat("audio"), "m4a");
   assert.equal(extensionForFormat("video-1080p"), "mp4");
   assert.throws(() => extensionForFormat("nope"));
+});
+
+test("YTDLP_YOUTUBE_ARGS requests non-web clients to dodge the bot check", () => {
+  const value = YTDLP_YOUTUBE_ARGS.join(" ");
+  assert.match(value, /--extractor-args/);
+  assert.match(value, /player_client=default,tv,web_safari/);
 });
 
 test("media signature round-trips and rejects tampering", () => {

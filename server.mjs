@@ -14,6 +14,7 @@ import {
 import {
   FAILURE_MESSAGES,
   SUPPORTED_FORMATS,
+  YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
   extensionForFormat,
   parseFfprobeDuration,
@@ -184,7 +185,15 @@ function validateJob(body) {
 async function probe(url) {
   const result = await runCommand(
     YTDLP_PATH,
-    ["-J", "--no-playlist", "--no-warnings", "--skip-download", "--", url],
+    [
+      "-J",
+      "--no-playlist",
+      "--no-warnings",
+      "--skip-download",
+      ...YTDLP_YOUTUBE_ARGS,
+      "--",
+      url,
+    ],
     60_000,
   );
   if (result.code !== 0)
@@ -218,6 +227,7 @@ function download(url, format, { jobId, maxSizeBytes }) {
       "-o",
       outputTemplate,
       ...ytdlpArgsForFormat(format),
+      ...YTDLP_YOUTUBE_ARGS,
       "--",
       url,
     ],

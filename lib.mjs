@@ -52,6 +52,18 @@ export const FAILURE_MESSAGES = {
   generic: "تعذّر تنزيل الوسائط من هذا الرابط.",
 };
 
+/**
+ * yt-dlp arguments shared by the probe and download calls. YouTube bot-checks
+ * the `web` client hardest from a datacenter IP, so we ask for a spread of
+ * clients (`default` expands to the jslss set on an image without Deno, then
+ * `tv` and `web_safari`). `tv` is normally token-free; `web_safari` often
+ * escapes the check where `web` does not.
+ */
+export const YTDLP_YOUTUBE_ARGS = [
+  "--extractor-args",
+  "youtube:player_client=default,tv,web_safari",
+];
+
 export function ytdlpArgsForFormat(format) {
   const args = FORMAT_ARGS[format];
   if (!args) throw new Error(`unsupported format: ${format}`);
