@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  FAILURE_MESSAGES,
   classifyYtdlpFailure,
   extensionForFormat,
   parseFfprobeDuration,
@@ -78,4 +79,49 @@ test("classifyYtdlpFailure", () => {
   assert.equal(classifyYtdlpFailure("ERROR: larger than max-filesize"), "size");
   assert.equal(classifyYtdlpFailure("ERROR: Unsupported URL"), "unsupported");
   assert.equal(classifyYtdlpFailure("boom"), "generic");
+});
+
+test("classifyYtdlpFailure distinguishes platform blocks from unavailable media", () => {
+  assert.equal(
+    classifyYtdlpFailure(
+      "ERROR: [youtube] x: Sign in to confirm you're not a bot. Use --cookies",
+    ),
+    "blocked",
+  );
+  assert.equal(
+    classifyYtdlpFailure(
+      "ERROR: unable to download webpage: HTTP Error 403: Forbidden",
+    ),
+    "blocked",
+  );
+  assert.equal(
+    classifyYtdlpFailure("ERROR: HTTP Error 429: Too Many Requests"),
+    "blocked",
+  );
+  assert.equal(
+    classifyYtdlpFailure("ERROR: [youtube] x: Video unavailable"),
+    "unavailable",
+  );
+  assert.equal(
+    classifyYtdlpFailure(
+      "ERROR: [youtube] x: This video is not available in your country",
+    ),
+    "unavailable",
+  );
+});
+
+test("FAILURE_MESSAGES covers every kind the classifier can return", () => {
+  const kinds = [
+    "duration",
+    "size",
+    "unsupported",
+    "blocked",
+    "unavailable",
+    "timeout",
+    "generic",
+  ];
+  for (const kind of kinds) {
+    assert.equal(typeof FAILURE_MESSAGES[kind], "string");
+    assert.ok(FAILURE_MESSAGES[kind].length > 0);
+  }
 });

@@ -56,6 +56,22 @@ let active = 0;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** How much of the extractor output to keep in a log line; the tail matters most. */
+const STDERR_LOG_LIMIT = 2000;
+
+/**
+ * Emit the raw extractor output so a failure can be diagnosed from the host's
+ * logs instead of being collapsed to a generic visitor-facing message. The
+ * visitor never sees this; only Render's log stream does.
+ */
+function logFailure(jobId, stage, kind, detail) {
+  const tail = String(detail ?? "").trim();
+  const suffix = tail.length > 0 ? ` :: ${tail.slice(-STDERR_LOG_LIMIT)}` : "";
+  console.error(
+    `[downloader] job=${jobId} stage=${stage} kind=${kind}${suffix}`,
+  );
+}
+
 function sendJson(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -172,7 +188,11 @@ async function probe(url) {
     60_000,
   );
   if (result.code !== 0)
-    return { ok: false, kind: classifyYtdlpFailure(result.stderr) };
+    return {
+      ok: false,
+      kind: classifyYtdlpFailure(result.stderr),
+      stderr: result.stderr,
+    };
   try {
     const info = JSON.parse(result.stdout);
     return {
@@ -181,7 +201,7 @@ async function probe(url) {
       duration: typeof info.duration === "number" ? info.duration : null,
     };
   } catch {
-    return { ok: false, kind: "generic" };
+    return { ok: false, kind: "generic", stderr: result.stdout };
   }
 }
 
@@ -262,45 +282,46 @@ async function handleJob(job) {
   } = job;
   let workFile = null;
   try {
-    const meta = await probe(url);
-    if (!meta.ok) {
+    // Record the raw extractor output in the host log and echo the machine-
+    // readable kind back to the app so a failure is diagnosable end to end.
+    const fail = async (kind, stage, detail) => {
+      logFailure(jobId, stage, kind, detail);
       await postCallback(callbackUrl, {
         jobId,
         status: "failed",
-        error: FAILURE_MESSAGES[meta.kind],
+        code: kind,
+        error: FAILURE_MESSAGES[kind] ?? FAILURE_MESSAGES.generic,
       });
+    };
+
+    const meta = await probe(url);
+    if (!meta.ok) {
+      await fail(meta.kind, "probe", meta.stderr);
       return;
     }
     if (meta.duration !== null && meta.duration > maxDurationSeconds) {
-      await postCallback(callbackUrl, {
-        jobId,
-        status: "failed",
-        error: FAILURE_MESSAGES.duration,
-      });
+      await fail("duration", "duration");
       return;
     }
 
     const result = await download(url, format, { jobId, maxSizeBytes });
     if (result.timedOut || result.code !== 0) {
-      const kind = result.timedOut
-        ? "generic"
-        : classifyYtdlpFailure(result.stderr);
-      await postCallback(callbackUrl, {
-        jobId,
-        status: "failed",
-        error: FAILURE_MESSAGES[kind],
-      });
+      if (result.timedOut) {
+        await fail("timeout", "download-timeout");
+      } else {
+        await fail(
+          classifyYtdlpFailure(result.stderr),
+          "download",
+          result.stderr,
+        );
+      }
       return;
     }
 
     const expectedExt = extensionForFormat(format);
     workFile = findOutput(jobId, expectedExt);
     if (!workFile) {
-      await postCallback(callbackUrl, {
-        jobId,
-        status: "failed",
-        error: FAILURE_MESSAGES.generic,
-      });
+      await fail("generic", "output-missing");
       return;
     }
 
@@ -311,11 +332,7 @@ async function handleJob(job) {
       path.extname(workFile).replace(/^\./, "").toLowerCase() || expectedExt;
     const sizeBytes = statSync(workFile).size;
     if (sizeBytes > maxSizeBytes) {
-      await postCallback(callbackUrl, {
-        jobId,
-        status: "failed",
-        error: FAILURE_MESSAGES.size,
-      });
+      await fail("size", "size");
       return;
     }
 
@@ -345,10 +362,12 @@ async function handleJob(job) {
         expiresAt: new Date(expiresAtMs).toISOString(),
       },
     });
-  } catch {
+  } catch (error) {
+    logFailure(jobId, "exception", "generic", error?.stack ?? error);
     await postCallback(callbackUrl, {
       jobId,
       status: "failed",
+      code: "generic",
       error: FAILURE_MESSAGES.generic,
     });
   } finally {

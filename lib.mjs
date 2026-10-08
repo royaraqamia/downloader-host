@@ -37,11 +37,18 @@ const FORMAT_EXT = {
   "video-1080p": "mp4",
 };
 
-/** Visitor-facing reasons, matching what the app surfaces on a `failed` job. */
+/**
+ * Visitor-facing reasons, keyed by failure kind (the same string is echoed to
+ * the app as `code`). Keep `generic` as the catch-all: a distinct message must
+ * mean the extractor was actually understood, not guessed.
+ */
 export const FAILURE_MESSAGES = {
   duration: "مدة الوسائط تتجاوز الحدّ المسموح (15 دقيقة).",
   size: "حجم الملف يتجاوز الحدّ المسموح.",
   unsupported: "هذا الرابط غير مدعوم.",
+  blocked: "الموقع يحجب خادم التنزيل مؤقتًا؛ حاول مجددًا بعد قليل.",
+  unavailable: "هذا الفيديو غير متاح.",
+  timeout: "استغرق تنزيل الوسائط وقتًا أطول من المتوقع.",
   generic: "تعذّر تنزيل الوسائط من هذا الرابط.",
 };
 
@@ -104,6 +111,24 @@ export function classifyYtdlpFailure(stderr) {
   const text = String(stderr ?? "");
   if (/does not pass filter/i.test(text)) return "duration";
   if (/max-filesize|larger than max/i.test(text)) return "size";
+  // The extractor is being refused by the platform: bot checks, rate limits and
+  // IP/geo blocks. Checked before `unsupported`, whose "unable to extract" catch
+  // would otherwise swallow these.
+  if (
+    /sign in to confirm|not a bot|cookies|http error 403|forbidden|\b429\b|too many requests|rate.?limit|blocked|unable to download webpage|temporary failure in name resolution/i.test(
+      text,
+    )
+  ) {
+    return "blocked";
+  }
+  // The link itself resolves but the media is gone or gated for this caller.
+  if (
+    /private video|video unavailable|not available in your country|has been removed|removed by the uploader|account.*terminated|members-only|age.?restricted|sign in to view|login required|this video is not available/i.test(
+      text,
+    )
+  ) {
+    return "unavailable";
+  }
   if (
     /unsupported url|is not a valid url|no video formats found|unable to extract/i.test(
       text,
