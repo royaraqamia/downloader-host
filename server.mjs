@@ -132,8 +132,15 @@ function hostnameOf(url) {
 
 function validateJob(body) {
   if (!body || typeof body !== "object") return null;
-  const { jobId, url, format, callbackUrl, maxDurationSeconds, maxSizeBytes } =
-    body;
+  const {
+    jobId,
+    url,
+    format,
+    callbackUrl,
+    maxDurationSeconds,
+    maxSizeBytes,
+    linkTtlSeconds,
+  } = body;
   if (typeof jobId !== "string" || !UUID_RE.test(jobId)) return null;
   if (typeof url !== "string" || !HTTP_URL_RE.test(url)) return null;
   if (!SUPPORTED_FORMATS.includes(format)) return null;
@@ -143,6 +150,10 @@ function validateJob(body) {
   const size = Number(maxSizeBytes);
   if (!Number.isFinite(duration) || duration <= 0) return null;
   if (!Number.isFinite(size) || size <= 0) return null;
+  // Optional: the app may tune the signed link's lifetime; fall back to the env
+  // default when it is absent or unusable.
+  const ttl = Number(linkTtlSeconds);
+  const linkTtl = Number.isFinite(ttl) && ttl > 0 ? ttl : null;
   return {
     jobId,
     url,
@@ -150,6 +161,7 @@ function validateJob(body) {
     callbackUrl,
     maxDurationSeconds: duration,
     maxSizeBytes: size,
+    linkTtlSeconds: linkTtl,
   };
 }
 
@@ -239,8 +251,15 @@ async function postCallback(callbackUrl, payload) {
 }
 
 async function handleJob(job) {
-  const { jobId, url, format, callbackUrl, maxDurationSeconds, maxSizeBytes } =
-    job;
+  const {
+    jobId,
+    url,
+    format,
+    callbackUrl,
+    maxDurationSeconds,
+    maxSizeBytes,
+    linkTtlSeconds,
+  } = job;
   let workFile = null;
   try {
     const meta = await probe(url);
@@ -304,7 +323,8 @@ async function handleJob(job) {
       (await probeDuration(workFile)) ?? meta.duration ?? 0;
 
     const fileId = randomUUID();
-    const expiresAtMs = Date.now() + MEDIA_TTL_SECONDS * 1000;
+    const ttlSeconds = linkTtlSeconds ?? MEDIA_TTL_SECONDS;
+    const expiresAtMs = Date.now() + ttlSeconds * 1000;
     const finalPath = path.join(MEDIA_DIR, `${fileId}.${ext}`);
     renameSync(workFile, finalPath);
     workFile = null;
