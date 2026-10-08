@@ -5,6 +5,7 @@ services:
     plan: free
     region: frankfurt
     healthCheckPath: /healthz
+    autoDeploy: true
     envVars:
       - key: PUBLIC_BASE_URL
         sync: false
