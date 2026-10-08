@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   FAILURE_MESSAGES,
+  YTDLP_NETWORK_ARGS,
   YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
   extensionForFormat,
@@ -32,6 +33,14 @@ test("YTDLP_YOUTUBE_ARGS requests non-web clients to dodge the bot check", () =>
   const value = YTDLP_YOUTUBE_ARGS.join(" ");
   assert.match(value, /--extractor-args/);
   assert.match(value, /player_client=default,tv,web_safari/);
+});
+
+test("YTDLP_NETWORK_ARGS retries transient socket/segment failures", () => {
+  const value = YTDLP_NETWORK_ARGS.join(" ");
+  assert.match(value, /--socket-timeout 15/);
+  assert.match(value, /--retries 5/);
+  assert.match(value, /--fragment-retries 5/);
+  assert.match(value, /--extractor-retries 3/);
 });
 
 test("media signature round-trips and rejects tampering", () => {

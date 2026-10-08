@@ -14,6 +14,7 @@ import {
 import {
   FAILURE_MESSAGES,
   SUPPORTED_FORMATS,
+  YTDLP_NETWORK_ARGS,
   YTDLP_YOUTUBE_ARGS,
   classifyYtdlpFailure,
   extensionForFormat,
@@ -54,6 +55,21 @@ mkdirSync(MEDIA_DIR, { recursive: true });
 const media = new Map();
 const queue = [];
 let active = 0;
+
+/**
+ * jobId -> last accepted time. Idempotency guard: the app retries a dispatch when
+ * the acknowledgement is lost, and a job must be processed exactly once.
+ */
+const acceptedJobs = new Map();
+const ACCEPTED_JOB_TTL_MS = 60 * 60 * 1000;
+
+function wasAccepted(jobId) {
+  const now = Date.now();
+  for (const [id, at] of acceptedJobs) {
+    if (now - at > ACCEPTED_JOB_TTL_MS) acceptedJobs.delete(id);
+  }
+  return acceptedJobs.has(jobId);
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -191,6 +207,7 @@ async function probe(url) {
       "--no-warnings",
       "--skip-download",
       ...YTDLP_YOUTUBE_ARGS,
+      ...YTDLP_NETWORK_ARGS,
       "--",
       url,
     ],
@@ -228,6 +245,7 @@ function download(url, format, { jobId, maxSizeBytes }) {
       outputTemplate,
       ...ytdlpArgsForFormat(format),
       ...YTDLP_YOUTUBE_ARGS,
+      ...YTDLP_NETWORK_ARGS,
       "--",
       url,
     ],
@@ -480,6 +498,12 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 400, { error: "invalid job" });
       return;
     }
+    // Idempotent: a retried dispatch for a job already accepted must not re-run it.
+    if (wasAccepted(job.jobId)) {
+      sendJson(res, 202, { accepted: true, duplicate: true });
+      return;
+    }
+    acceptedJobs.set(job.jobId, Date.now());
     sendJson(res, 202, { accepted: true });
     queue.push(job);
     pump();

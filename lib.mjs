@@ -64,6 +64,22 @@ export const YTDLP_YOUTUBE_ARGS = [
   "youtube:player_client=default,tv,web_safari",
 ];
 
+/**
+ * Network-resilience flags shared by the probe and download calls: a transient
+ * socket or segment failure should be retried inside yt-dlp, not surfaced as a
+ * failed download.
+ */
+export const YTDLP_NETWORK_ARGS = [
+  "--socket-timeout",
+  "15",
+  "--retries",
+  "5",
+  "--fragment-retries",
+  "5",
+  "--extractor-retries",
+  "3",
+];
+
 export function ytdlpArgsForFormat(format) {
   const args = FORMAT_ARGS[format];
   if (!args) throw new Error(`unsupported format: ${format}`);
