@@ -360,6 +360,9 @@ async function handleJob(job) {
     media.set(fileId, { path: finalPath, filename, expiresAt: expiresAtMs });
 
     const signature = signMedia(fileId, expiresAtMs, MEDIA_SIGNING_SECRET);
+    console.log(
+      `[downloader] job=${jobId} stage=ready platform=${hostnameOf(url) ?? "unknown"} sizeBytes=${sizeBytes} durationSeconds=${durationSeconds} file=${filename}`,
+    );
     await postCallback(callbackUrl, {
       jobId,
       status: "ready",
