@@ -17,8 +17,9 @@ The wire contract of record lives in the app repository:
 3. The host `POST`s the result to the app's callback URL (shared secret): a
    `ready` payload with a short-lived signed media link, or a `failed` payload with
    a visitor-readable reason.
-4. The media link is HMAC-signed, expires (default 5 minutes), and the file is
-   deleted once downloaded or expired.
+4. The media link is HMAC-signed and expires after the dispatch payload's
+   `linkTtlSeconds` (falling back to `MEDIA_TTL_SECONDS`); the file is deleted
+   once downloaded or expired.
 
 The app never carries media bytes; the visitor downloads straight from here.
 
@@ -31,7 +32,7 @@ The app never carries media bytes; the visitor downloads straight from here.
 | `CALLBACK_SECRET`      | yes      | —                       | Must equal the app's `DOWNLOADER_CALLBACK_SECRET`.     |
 | `MEDIA_SIGNING_SECRET` | no       | `CALLBACK_SECRET`       | HMAC key for media links.                              |
 | `PORT`                 | no       | `8080`                  | Listen port (Render sets this).                        |
-| `MEDIA_TTL_SECONDS`    | no       | `300`                   | Media link lifetime.                                   |
+| `MEDIA_TTL_SECONDS`    | no       | `300`                   | Media link lifetime; the app can override per job.     |
 | `MAX_CONCURRENT_JOBS`  | no       | `2`                     | Jobs processed at once.                                |
 | `JOB_TIMEOUT_MS`       | no       | `240000`                | Per-job ceiling.                                       |
 | `WORK_DIR`             | no       | `/tmp/downloader`       | Scratch + served files.                                |
