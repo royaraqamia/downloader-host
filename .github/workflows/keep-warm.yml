@@ -1,0 +1,30 @@
+name: keep-warm
+
+# The Render free tier spins a web service down after ~15 minutes of no inbound
+# traffic, and a cold start can outlast the app's dispatch timeout, so a visitor's
+# first request fails with "service unavailable". A lightweight ping every few
+# minutes keeps the instance awake.
+#
+# GitHub can delay scheduled runs under load and disables them after 60 days of
+# repo inactivity. If you need a stronger guarantee, point a free 1-minute uptime
+# monitor (e.g. cron-job.org, UptimeRobot) at the same URL instead of/in addition
+# to this.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: curl -fsS --max-time 90 --retry 2 --retry-delay 5 https://downloader-host.onrender.com/healthz
